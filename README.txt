@@ -1,12 +1,4 @@
 # osmss
-                                 
-Open source malware signature scanner
-
-VERSION 1.0
-
-Python script that downloads the full MalwareBazaar database and scans a directory of files, outputting matching file names to a .txt file for further analysis, removal.
-
-
 
          _______                   _____                    _____                    _____                    _____          
         /::\    \                 /\    \                  /\    \                  /\    \                  /\    \         
@@ -30,3 +22,9 @@ Python script that downloads the full MalwareBazaar database and scans a directo
          ~~                      \::/    /                \::/    /                \::/    /                \::/    /        
                                   \/____/                  \/____/                  \/____/                  \/____/         
                                                                                                                              
+
+Open source malware signature scanner
+
+VERSION 1.0
+
+Python script that downloads the full MalwareBazaar database and scans a directory of files, outputting matching file names to a .txt file for further analysis, removal.
