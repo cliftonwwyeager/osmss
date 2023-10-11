@@ -55,24 +55,41 @@ all_files = [os.path.join(foldername, filename)
 
 # Create and configure the main window
 window = tk.Tk()
-window.title("Malware Scanner")
-window.geometry("600x400")
+window.title("OSMSS")
+window.geometry("800x400")
 window.configure(bg='black')
+
+# ASCII Logo
+ascii_logo = """
+ 
+ $$$$$$\   $$$$$$\  $$\      $$\  $$$$$$\   $$$$$$\  
+$$  __$$\ $$  __$$\ $$$\    $$$ |$$  __$$\ $$  __$$\ 
+$$ /  $$ |$$ /  \__|$$$$\  $$$$ |$$ /  \__|$$ /  \__|
+$$ |  $$ |\$$$$$$\  $$\$$\$$ $$ |\$$$$$$\  \$$$$$$\  
+$$ |  $$ | \____$$\ $$ \$$$  $$ | \____$$\  \____$$\ 
+$$ |  $$ |$$\   $$ |$$ |\$  /$$ |$$\   $$ |$$\   $$ |
+ $$$$$$  |\$$$$$$  |$$ | \_/ $$ |\$$$$$$  |\$$$$$$  |
+ \______/  \______/ \__|     \__| \______/  \______/  
+      
+"""
+
+logo_label = tk.Label(window, text=ascii_logo, bg='black', fg='green', font=("Courier", 12))
+logo_label.grid(column=0, row=0, pady=10, padx=20, columnspan=3)
 
 # Add a progress bar to display the scan progress
 progress_bar = ttk.Progressbar(window, length=500, mode='determinate', maximum=len(all_files))
 progress_bar.grid(column=0, row=0, pady=20, padx=20, columnspan=2)
 
 # Label to show percentage
-percentage_label = tk.Label(window, text="0%", bg='black', fg='green', font=("Helvetica", 16))
+percentage_label = tk.Label(window, text="0%", bg='black', fg='green', font=("Courier", 16))
 percentage_label.grid(column=2, row=0, pady=20, padx=20)
 
 # Label to show the file being scanned
-file_label = tk.Label(window, text="", bg='black', fg='green', font=("Helvetica", 12), wraplength=550)
+file_label = tk.Label(window, text="", bg='black', fg='green', font=("Courier", 12), wraplength=550)
 file_label.grid(column=0, row=1, pady=10, padx=20, columnspan=3)
 
 # Label to show estimated time left
-time_label = tk.Label(window, text="", bg='black', fg='green', font=("Helvetica", 12), wraplength=550)
+time_label = tk.Label(window, text="", bg='black', fg='green', font=("Courier", 12), wraplength=550)
 time_label.grid(column=0, row=2, pady=10, padx=20, columnspan=3)
 
 # Check files in C drive against malicious signatures and update the UI
