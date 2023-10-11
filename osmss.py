@@ -13,7 +13,7 @@ malware_data_url = "https://bazaar.abuse.ch/export/csv/full/"
 response = requests.get(malware_data_url)
 
 if response.status_code == 200:
-    with open("malware_data.csv", "wb") as f:
+    with open("full.csv", "wb") as f:
         f.write(response.content)
 else:
     print("Failed to download malware data")
@@ -21,7 +21,7 @@ else:
 
 # Load malicious signatures from the CSV file
 malicious_signatures = set()
-with open("malware_data.csv", "r", encoding="utf-8", errors="ignore") as f:
+with open("full.csv", "r", encoding="utf-8", errors="ignore") as f:
     reader = csv.reader(f)
     next(reader)  # Skip the header row
     for row in reader:
@@ -81,15 +81,15 @@ progress_bar = ttk.Progressbar(window, length=500, mode='determinate', maximum=l
 progress_bar.grid(column=0, row=0, pady=20, padx=20, columnspan=2)
 
 # Label to show percentage
-percentage_label = tk.Label(window, text="0%", bg='black', fg='green', font=("Courier", 16))
+percentage_label = tk.Label(window, text="0%", bg='black', fg='green', font=("Helvetica", 16))
 percentage_label.grid(column=2, row=0, pady=20, padx=20)
 
 # Label to show the file being scanned
-file_label = tk.Label(window, text="", bg='black', fg='green', font=("Courier", 12), wraplength=550)
+file_label = tk.Label(window, text="", bg='black', fg='green', font=("Helvetica", 12), wraplength=550)
 file_label.grid(column=0, row=1, pady=10, padx=20, columnspan=3)
 
 # Label to show estimated time left
-time_label = tk.Label(window, text="", bg='black', fg='green', font=("Courier", 12), wraplength=550)
+time_label = tk.Label(window, text="", bg='black', fg='green', font=("Helvetica", 12), wraplength=550)
 time_label.grid(column=0, row=2, pady=10, padx=20, columnspan=3)
 
 # Check files in C drive against malicious signatures and update the UI
