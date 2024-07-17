@@ -8,36 +8,49 @@ import hashlib
 import threading
 from queue import Queue
 
-malware_data_url = "https://bazaar.abuse.ch/export/csv/full/"
+MALWARE_DATA_URL = "https://bazaar.abuse.ch/export/csv/full/"
+CSV_FILE = "full.csv"
+MALWARE_HASH_COL_INDEX = 1
 
 def download_malware_data():
-    response = requests.get(malware_data_url, stream=True)
+    response = requests.get(MALWARE_DATA_URL, stream=True)
     if response.status_code == 200:
-        with open("full.csv", "wb") as f:
+        total_size = int(response.headers.get('content-length', 0))
+        downloaded_size = 0
+        with open(CSV_FILE, "wb") as f:
             for chunk in response.iter_content(chunk_size=8192):
                 if chunk:
                     f.write(chunk)
+                    downloaded_size += len(chunk)
+                    print(f"Downloading: {downloaded_size / total_size * 100:.2f}%")
     else:
         print("Failed to download malware data")
         exit()
 
 def load_malicious_signatures():
     signatures = set()
-    with open("full.csv", "r", encoding="utf-8", errors="ignore") as f:
-        reader = csv.reader(f)
-        next(reader)
-        for row in reader:
-            if len(row) > 1:
-                signatures.add(row[1])
+    try:
+        with open(CSV_FILE, "r", encoding="utf-8", errors="ignore") as f:
+            reader = csv.reader(f)
+            next(reader)
+            for row in reader:
+                if len(row) > MALWARE_HASH_COL_INDEX:
+                    signatures.add(row[MALWARE_HASH_COL_INDEX])
+    except FileNotFoundError:
+        print(f"{CSV_FILE} not found. Please download the malware data.")
+        exit()
+    except Exception as e:
+        print(f"Error loading signatures: {e}")
+        exit()
     return signatures
 
 def compute_hash(file_path):
     sha256_hash = hashlib.sha256()
     try:
-        with open(file_path,"rb") as f:
+        with open(file_path, "rb") as f:
             for byte_block in iter(lambda: f.read(4096), b""):
                 sha256_hash.update(byte_block)
-            return sha256_hash.hexdigest()
+        return sha256_hash.hexdigest()
     except Exception as e:
         print(f"Cannot read file {file_path} due to {str(e)}")
         return None
@@ -60,7 +73,7 @@ def update_ui(queue, matched_files, start_time, progress_bar, percentage_label, 
     while not queue.empty():
         progress = total_files - queue.qsize()
         progress_bar['value'] = progress
-        percentage_label['text'] = f"{(progress/total_files)*100:.2f}%"
+        percentage_label['text'] = f"{(progress / total_files) * 100:.2f}%"
         file_label['text'] = f"Scanning: {queue.queue[0]}" if not queue.empty() else "Scanning completed"
         elapsed_time = time.time() - start_time
         files_per_second = progress / elapsed_time if elapsed_time > 0 else 0
@@ -68,8 +81,8 @@ def update_ui(queue, matched_files, start_time, progress_bar, percentage_label, 
         remaining_time = remaining_files / files_per_second if files_per_second > 0 else 0
         minutes, seconds = divmod(int(remaining_time), 60)
         time_label['text'] = f"Estimated time left: {minutes}m {seconds}s"
-        window.update_idletasks()
         time.sleep(1)
+        window.update_idletasks()
 
 if __name__ == "__main__":
     download_malware_data()
@@ -80,7 +93,7 @@ if __name__ == "__main__":
                 for filename in filenames]
 
     window = tk.Tk()
-    window.title("OSMSS v1.0.3")
+    window.title("OSMSS v1.0.5")
     window.geometry("800x400")
     window.configure(bg='black')
 
