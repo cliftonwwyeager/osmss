@@ -6,7 +6,7 @@ from tkinter import ttk
 import time
 import hashlib
 import threading
-from queue import Queue
+from queue import Queue, Empty
 
 MALWARE_DATA_URL = "https://bazaar.abuse.ch/export/csv/full/"
 CSV_FILE = "full.csv"
@@ -71,27 +71,26 @@ def scan_files(queue, signatures, matched_files, ui_queue):
         queue.task_done()
 
 def update_ui(ui_queue, start_time, progress_bar, percentage_label, file_label, time_label, total_files):
-    while True:
-        try:
-            file_path, status = ui_queue.get_nowait()
-        except Queue.Empty:
-            break
-        
-        progress = total_files - file_queue.qsize()
-        progress_percentage = (progress / total_files) * 100
-        elapsed_time = time.time() - start_time
-        files_per_second = progress / elapsed_time if elapsed_time > 0 else 0
-        remaining_files = file_queue.qsize()
-        remaining_time = remaining_files / files_per_second if files_per_second > 0 else 0
-        minutes, seconds = divmod(int(remaining_time), 60)
-        
-        progress_bar['value'] = progress
-        percentage_label.config(text=f"{progress_percentage:.2f}%")
-        file_label.config(text=f"Scanning: {file_path}" if status == "scanned" else "Scanning completed")
-        time_label.config(text=f"Estimated time left: {minutes}m {seconds}s")
+    try:
+        file_path, status = ui_queue.get_nowait()
+    except Empty:
+        root.after(1000, update_ui, ui_queue, start_time, progress_bar, percentage_label, file_label, time_label, total_files)
+        return
 
-        ui_queue.task_done()
+    progress = total_files - file_queue.qsize()
+    progress_percentage = (progress / total_files) * 100
+    elapsed_time = time.time() - start_time
+    files_per_second = progress / elapsed_time if elapsed_time > 0 else 0
+    remaining_files = file_queue.qsize()
+    remaining_time = remaining_files / files_per_second if files_per_second > 0 else 0
+    minutes, seconds = divmod(int(remaining_time), 60)
+    
+    progress_bar['value'] = progress
+    percentage_label.config(text=f"{progress_percentage:.2f}%")
+    file_label.config(text=f"Scanning: {file_path}" if status == "scanned" else "Scanning completed")
+    time_label.config(text=f"Estimated time left: {minutes}m {seconds}s")
 
+    ui_queue.task_done()
     root.after(1000, update_ui, ui_queue, start_time, progress_bar, percentage_label, file_label, time_label, total_files)
 
 if __name__ == "__main__":
@@ -103,7 +102,7 @@ if __name__ == "__main__":
                 for filename in filenames]
 
     root = tk.Tk()
-    root.title("OSMSS v1.0.5")
+    root.title("OSMSS v1.0.7")
     root.geometry("800x400")
     root.configure(bg='black')
 
