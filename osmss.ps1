@@ -1,10 +1,13 @@
 Param(
-    [string]$MalwareDataUrl        = "https://bazaar.abuse.ch/export/csv/full/",
-    [string]$LocalCsvFile          = "full.csv",
-    [string]$MatchedFilesOutput    = "matched_files.csv",
-    [int]$MalwareHashColIndex      = 1,
-    [int]$MalwareSignatureColIndex = 7,
-    [int]$MalwareVtPercentColIndex = 10
+    [string]$BazaarUrl              = "https://bazaar.abuse.ch/export/csv/full/",
+    [string]$LocalBazaarFile        = "bazaar.csv",
+    [int]$BazaarHashIndex           = 1,
+    [int]$BazaarSignatureIndex      = 7,
+    [int]$BazaarVtPercentIndex      = 10,
+    [string]$MalshareApiKey         = "YOUR_API_KEY_HERE",
+    [string]$LocalMalshareFile      = "malshare.txt",
+    [string]$MatchedFilesOutput     = "matched_files.csv",
+    [Alias("d")][string[]]$Directories = @("C:\")
 )
 
 function Download-MalwareData {
@@ -12,67 +15,92 @@ function Download-MalwareData {
         [string]$Url,
         [string]$Destination
     )
-
-    Write-Host "Downloading malware data from $Url ..."
+    if (Test-Path $Destination) {
+        $lastWrite = (Get-Item $Destination).LastWriteTime
+        if ((Get-Date) - $lastWrite -lt [TimeSpan]::FromHours(24)) {
+            Write-Host "Using cached data from $Destination" -ForegroundColor Green
+            return $Destination
+        }
+    }
+    Write-Host "Downloading data from $Url ..." -ForegroundColor Green
     try {
-        Invoke-WebRequest -Uri $Url -UseBasicParsing -OutFile $Destination
-        Write-Host "Download complete. File saved as $Destination"
+        $response = Invoke-WebRequest -Uri $Url -UseBasicParsing
+        if ($response.Headers.'Content-Disposition' -and ($response.Headers.'Content-Disposition' -match 'filename="?([^";]+)"?')) {
+            $fileName = $matches[1]
+            Write-Host "Detected filename from header: $fileName" -ForegroundColor Green
+            $Destination = $fileName
+        }
+        $response.Content | Out-File -FilePath $Destination -Encoding ascii
+        Write-Host "Download complete. Saved as $Destination" -ForegroundColor Green
+        return $Destination
     }
     catch {
-        Write-Error "Failed to download malware data from $Url. Error: $($_.Exception.Message)"
+        Write-Error "Failed to download from $Url. Error: $($_.Exception.Message)"
         throw
     }
 }
 
-function Load-MaliciousSignatures {
+function Load-AllSignatures {
     Param (
-        [string]$CsvPath,
-        [int]$HashIndex,
-        [int]$SignatureIndex,
-        [int]$VtPercentIndex
+        [string]$BazaarCsvPath,
+        [int]$BazaarHashIndex,
+        [int]$BazaarSignatureIndex,
+        [int]$BazaarVtPercentIndex,
+        [string]$MalsharePath
     )
-
-    Write-Host "Loading malicious signatures from $CsvPath ..."
-    if (-not (Test-Path $CsvPath)) {
-        Write-Error "$CsvPath not found. Please download the malware data first."
-        throw
-    }
-
     $signatures = @{}
 
-    try {
-        $csvLines = Get-Content $CsvPath -ErrorAction Stop
-        $csvLines = $csvLines | Select-Object -Skip 1
-
-        foreach ($line in $csvLines) {
-            $row = $line -split ","
-            if ($row.Count -gt $HashIndex) {
-                $hashVal = $row[$HashIndex].Trim('"')
-                if (-not [string]::IsNullOrWhiteSpace($hashVal)) {
-                    $signature = if ($row.Count -gt $SignatureIndex) {
-                        $row[$SignatureIndex].Trim('"')
-                    } else {
-                        "Unknown"
-                    }
-                    $vtPercent = if ($row.Count -gt $VtPercentIndex) {
-                        $row[$VtPercentIndex].Trim('"')
-                    } else {
-                        "Unknown"
-                    }
-                    $signatures[$hashVal.ToLower()] = [pscustomobject]@{
-                        Signature = $signature
-                        VTPercent = $vtPercent
+    Write-Host "Loading signatures from MalwareBazaar (CSV)..." -ForegroundColor Green
+    if (Test-Path $BazaarCsvPath) {
+        try {
+            $csvLines = Get-Content $BazaarCsvPath -ErrorAction Stop | Select-Object -Skip 1
+            foreach ($line in $csvLines) {
+                $row = $line -split ","
+                if ($row.Count -gt $BazaarHashIndex) {
+                    $hashVal = $row[$BazaarHashIndex].Trim('"')
+                    if (-not [string]::IsNullOrWhiteSpace($hashVal)) {
+                        $signature = if ($row.Count -gt $BazaarSignatureIndex) { $row[$BazaarSignatureIndex].Trim('"') } else { "Unknown" }
+                        $vtPercent = if ($row.Count -gt $BazaarVtPercentIndex) { $row[$BazaarVtPercentIndex].Trim('"') } else { "Unknown" }
+                        $signatures[$hashVal.ToLower()] = [pscustomobject]@{
+                            Signature = $signature
+                            VTPercent = $vtPercent
+                        }
                     }
                 }
             }
         }
+        catch {
+            Write-Error "Error processing $($BazaarCsvPath): $($_.Exception.Message)"
+        }
     }
-    catch {
-        Write-Error "Error loading signatures: $($_.Exception.Message)"
-        throw
+    else {
+        Write-Error "$BazaarCsvPath not found."
     }
 
-    Write-Host "Loaded $($signatures.Count) malicious signatures."
+    Write-Host "Loading signatures from Malshare (plain text)..." -ForegroundColor Green
+    if (Test-Path $MalsharePath) {
+        try {
+            $lines = Get-Content $MalsharePath -ErrorAction Stop
+            foreach ($line in $lines) {
+                $hashVal = $line.Trim()
+                if (-not [string]::IsNullOrWhiteSpace($hashVal)) {
+                    if (-not $signatures.ContainsKey($hashVal.ToLower())) {
+                        $signatures[$hashVal.ToLower()] = [pscustomobject]@{
+                            Signature = "Unknown"
+                            VTPercent = "Unknown"
+                        }
+                    }
+                }
+            }
+        }
+        catch {
+            Write-Error "Error reading ${MalsharePath}: $($_.Exception.Message)"
+        }
+    }
+    else {
+        Write-Error "$MalsharePath not found."
+    }
+    Write-Host "Total combined signatures: $($signatures.Count)" -ForegroundColor Green
     return $signatures
 }
 
@@ -80,23 +108,21 @@ function Compute-Hash {
     Param (
         [string]$FilePath
     )
-
     $sha256 = [System.Security.Cryptography.SHA256]::Create()
     $fileStream = $null
-
     try {
         $fileStream = New-Object System.IO.FileStream($FilePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
         $buffer = New-Object byte[] 4096
         while ($true) {
-            $read = $fileStream.Read($buffer, 0, 4096)
+            $read = $fileStream.Read($buffer, 0, $buffer.Length)
             if ($read -le 0) { break }
             $sha256.TransformBlock($buffer, 0, $read, $buffer, 0) | Out-Null
         }
         $sha256.TransformFinalBlock($buffer, 0, 0) | Out-Null
-        ($sha256.Hash | ForEach-Object ToString x2) -join ""
+        ($sha256.Hash | ForEach-Object { "{0:x2}" -f $_ }) -join ""
     }
     catch {
-        Write-Verbose "Cannot read file $($FilePath): $($_.Exception.Message)"
+        Write-Verbose "Cannot read file ${FilePath}: $($_.Exception.Message)"
         return $null
     }
     finally {
@@ -107,49 +133,77 @@ function Compute-Hash {
     }
 }
 
-Write-Host "`n==== OSMSS v1.0.7 (Console Version) ===="
+Write-Host "`n==== OSMSS v1.0.8 ====" -ForegroundColor Green
+$BazaarFile = Download-MalwareData -Url $BazaarUrl -Destination $LocalBazaarFile
+Download-MalwareData -Url ("https://malshare.com/api.php?api_key=$MalshareApiKey&action=getlist") -Destination $LocalMalshareFile
 
-Download-MalwareData -Url $MalwareDataUrl -Destination $LocalCsvFile
+$maliciousSignatures = Load-AllSignatures `
+    -BazaarCsvPath $BazaarFile `
+    -BazaarHashIndex $BazaarHashIndex `
+    -BazaarSignatureIndex $BazaarSignatureIndex `
+    -BazaarVtPercentIndex $BazaarVtPercentIndex `
+    -MalsharePath $LocalMalshareFile
 
-$maliciousSignatures = Load-MaliciousSignatures `
-    -CsvPath $LocalCsvFile `
-    -HashIndex $MalwareHashColIndex `
-    -SignatureIndex $MalwareSignatureColIndex `
-    -VtPercentIndex $MalwareVtPercentColIndex
-
-Write-Host "`nEnumerating files on C:\ ..."
+Write-Host "`nEnumerating files in directories: $($Directories -join ', ')" -ForegroundColor Green
 try {
-    $allFiles = Get-ChildItem -Path "C:\" -Recurse -File -Force -ErrorAction SilentlyContinue
+    $allFiles = Get-ChildItem -Path $Directories -Recurse -File -Force -ErrorAction SilentlyContinue
 } catch {
-    Write-Warning "Error enumerating files on C:\. (Try running as Administrator.)"
+    Write-Warning "Error enumerating files. (Try running as Administrator.)"
     return
 }
 
-Write-Host "Total files found: $($allFiles.Count)"
-
-$matches = New-Object System.Collections.Generic.List[PSObject]
-
-$index = 0
 $total = $allFiles.Count
+Write-Host "Total files found: $total" -ForegroundColor Green
 
-foreach ($file in $allFiles) {
-    $index++
-    Write-Progress -Activity "Scanning files" -Status "Computing hash for $($file.FullName)" -PercentComplete (($index / $total) * 100)
-    $hashVal = Compute-Hash -FilePath $file.FullName
-    if ($null -ne $hashVal) {
-        $hashVal = $hashVal.ToLower()
-        if ($maliciousSignatures.ContainsKey($hashVal)) {
-            $malInfo = $maliciousSignatures[$hashVal]
-            $matches.Add([pscustomobject]@{
-                File       = $file.FullName
-                Signature  = $malInfo.Signature
-                VTPercent  = $malInfo.VTPercent
-            })
+if ($PSVersionTable.PSVersion.Major -ge 7) {
+    Write-Host "Using parallel scanning with progress bar..." -ForegroundColor Green
+    $global:processed = 0
+    $matches = foreach ($result in $allFiles | ForEach-Object -Parallel {
+        $hashVal = Compute-Hash -FilePath $_.FullName
+        $obj = [PSCustomObject]@{ Match = $null }
+        if ($hashVal) {
+            $hashVal = $hashVal.ToLower()
+            $localSignatures = $using:maliciousSignatures
+            if ($localSignatures.ContainsKey($hashVal)) {
+                $malInfo = $localSignatures[$hashVal]
+                $obj.Match = [PSCustomObject]@{
+                    File       = $_.FullName
+                    Signature  = $malInfo.Signature
+                    VTPercent  = $malInfo.VTPercent
+                }
+            }
+        }
+        $obj
+    } -ThrottleLimit ([Environment]::ProcessorCount)) {
+        $global:processed++
+        Write-Progress -Activity "Scanning files" -Status "Processed $global:processed of $total" -PercentComplete (($global:processed / $total) * 100)
+        if ($result.Match) {
+            $result.Match
+        }
+    }
+} else {
+    Write-Host "Scanning files sequentially with progress bar..." -ForegroundColor Green
+    $matches = New-Object System.Collections.Generic.List[PSObject]
+    $index = 0
+    foreach ($file in $allFiles) {
+        $index++
+        Write-Progress -Activity "Scanning files" -Status "Computing hash for $($file.FullName)" -PercentComplete (($index / $total) * 100)
+        $hashVal = Compute-Hash -FilePath $file.FullName
+        if ($hashVal) {
+            $hashVal = $hashVal.ToLower()
+            if ($maliciousSignatures.ContainsKey($hashVal)) {
+                $malInfo = $maliciousSignatures[$hashVal]
+                $matches.Add([PSCustomObject]@{
+                    File       = $file.FullName
+                    Signature  = $malInfo.Signature
+                    VTPercent  = $malInfo.VTPercent
+                })
+            }
         }
     }
 }
 
-Write-Host "`nScan complete. Found $($matches.Count) suspicious/malicious files."
-Write-Host "Writing matches to $MatchedFilesOutput ..."
+Write-Host "`nScan complete. Found $($matches.Count) suspicious/malicious files." -ForegroundColor Green
+Write-Host "Writing matches to $MatchedFilesOutput ..." -ForegroundColor Green
 $matches | Export-Csv -Path $MatchedFilesOutput -NoTypeInformation
-Write-Host "Done! Output written to $MatchedFilesOutput"
+Write-Host "Done! Output written to $MatchedFilesOutput" -ForegroundColor Green
