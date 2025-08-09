@@ -11,6 +11,6 @@ Y8,        ,8P          `8b  88   `8b d8'   88          `8b          `8b
 
 Open source malware signature scanner
 
-VERSION 1.0.8
+VERSION 1.0.9
 
-Python/Powershell script that uses MalwareBazaar, Malshare and OpenMalware signatures and scans a directory of files, outputting matching file names to a .txt/.csv file for further analysis, removal.
+Python/Powershell script that uses MalwareBazaar, Malshare and OpenMalware signatures and scans a directory of files, outputting matching file names to a .txt/.csv file for further analysis and removal. The GUI now lists detected files alongside the reported malware type and provides a remove button for deleting selected items directly from the system.
