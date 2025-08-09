@@ -42,22 +42,34 @@ def download_source(source_name, url, dest_file, force_download=False):
         raise
 
 def load_signatures_from_file(source_name, file_path, file_type, hash_col_index):
-    signatures = set()
+    signatures = {}
     try:
         with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
             if file_type.lower() == "csv":
                 reader = csv.reader(f)
-                next(reader, None)
+                headers = next(reader, [])
+                headers_lower = [h.lower() for h in headers]
+                hash_idx = hash_col_index if hash_col_index is not None else 0
+                if headers_lower and hash_idx >= len(headers_lower):
+                    hash_idx = 0
+                sig_idx = None
+                for possible in ["signature", "detection", "malware"]:
+                    if possible in headers_lower:
+                        sig_idx = headers_lower.index(possible)
+                        break
                 for row in reader:
-                    if len(row) > hash_col_index:
-                        sig = row[hash_col_index].strip().lower()
+                    if len(row) > hash_idx:
+                        sig = row[hash_idx].strip().lower()
                         if sig:
-                            signatures.add(sig)
+                            malware_type = "Unknown"
+                            if sig_idx is not None and len(row) > sig_idx:
+                                malware_type = row[sig_idx].strip() or "Unknown"
+                            signatures[sig] = malware_type
             elif file_type.lower() == "txt":
                 for line in f:
                     sig = line.strip().lower()
                     if sig:
-                        signatures.add(sig)
+                        signatures[sig] = "Unknown"
             else:
                 print(f"[{source_name}] Unknown file type: {file_type}")
     except Exception as e:
@@ -66,7 +78,7 @@ def load_signatures_from_file(source_name, file_path, file_type, hash_col_index)
     return signatures
 
 def load_all_signatures(force_download=False):
-    combined_signatures = set()
+    combined_signatures = {}
     for source_name, url, file_type, hash_col_index in SIGNATURE_SOURCES:
         local_file = f"{source_name.lower()}_signatures.csv" if file_type.lower() == "csv" else f"{source_name.lower()}_signatures.txt"
         try:
@@ -101,11 +113,13 @@ def check_file_for_signatures(file_path, signatures, ui_queue, log_queue):
     file_hash = compute_hash(file_path)
     if file_hash:
         log_queue.put(f"Scanned {file_path} (hash: {file_hash[:8]}...)")
-        if file_hash.lower() in signatures:
-            ui_queue.put((file_path, "matched"))
-            log_queue.put(f"Malware detected: {file_path}")
-            return file_path
-    ui_queue.put((file_path, "scanned"))
+        lower_hash = file_hash.lower()
+        if lower_hash in signatures:
+            malware_type = signatures[lower_hash]
+            ui_queue.put((file_path, "matched", malware_type))
+            log_queue.put(f"Malware detected ({malware_type}): {file_path}")
+            return (file_path, malware_type)
+    ui_queue.put((file_path, "scanned", None))
     return None
 
 def scan_files(file_paths, signatures, ui_queue, log_queue, stop_event):
@@ -166,6 +180,11 @@ class OSMSS:
                                        font=("Consolas", 12), bg="#000000", fg="#00ff00",
                                        activebackground="#000000", activeforeground="#00ff00", bd=0, state=tk.DISABLED)
         self.export_button.pack(side=tk.LEFT, padx=5)
+        self.remove_button = tk.Button(self.control_frame, text="Remove File",
+                                       command=self.remove_selected_file,
+                                       font=("Consolas", 12), bg="#000000", fg="#00ff00",
+                                       activebackground="#000000", activeforeground="#00ff00", bd=0, state=tk.DISABLED)
+        self.remove_button.pack(side=tk.LEFT, padx=5)
         self.progress_frame = tk.Frame(master, bg="#000000")
         self.progress_frame.pack(fill=tk.X, padx=10, pady=5)
         self.progress_bar = ttk.Progressbar(self.progress_frame, length=800, mode='determinate')
@@ -180,6 +199,16 @@ class OSMSS:
                                      font=("Consolas", 12),
                                      bg="#000000", fg="#00ff00")
         self.status_label.pack(side=tk.LEFT)
+        self.results_frame = tk.Frame(master, bg="#000000")
+        self.results_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        self.results_tree = ttk.Treeview(self.results_frame, columns=("file", "type"), show="headings")
+        self.results_tree.heading("file", text="File Path")
+        self.results_tree.heading("type", text="Malware Type")
+        self.results_tree.column("file", width=700)
+        self.results_tree.column("type", width=200)
+        self.results_tree.pack(fill=tk.BOTH, expand=True)
+        self.results_tree.bind("<<TreeviewSelect>>", self.on_result_select)
+
         self.log_frame = tk.Frame(master, bg="#000000")
         self.log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         self.log_text = tk.Text(self.log_frame, bg="#000000", fg="#00ff00", wrap=tk.WORD,
@@ -225,6 +254,10 @@ class OSMSS:
         self.stop_scan_button.config(state=tk.NORMAL)
         self.export_button.config(state=tk.DISABLED)
         self.processed_count = 0
+        self.matched_files = []
+        for item in self.results_tree.get_children():
+            self.results_tree.delete(item)
+        self.remove_button.config(state=tk.DISABLED)
         self.start_time = time.time()
         threading.Thread(target=self.prepare_and_scan, daemon=True).start()
         self.master.after(100, self.update_ui)
@@ -239,11 +272,11 @@ class OSMSS:
         matched = scan_files(self.file_paths, signatures, self.ui_queue, self.log_queue, self.stop_event)
         self.matched_files = matched
         self.log("Scan complete.")
-        self.master.after(0, lambda: self.export_button.config(state=tk.NORMAL))
+        self.master.after(0, lambda: [self.export_button.config(state=tk.NORMAL), self.display_matched_files()])
         try:
             with open("matched_files.txt", "w") as f:
-                for file in self.matched_files:
-                    f.write(file + "\n")
+                for file_path, malware_type in self.matched_files:
+                    f.write(f"{file_path},{malware_type}\n")
             self.log("Matched files saved to matched_files.txt")
         except Exception as e:
             self.log(f"Error saving matched files: {e}")
@@ -251,12 +284,15 @@ class OSMSS:
     def update_ui(self):
         while not self.ui_queue.empty():
             try:
-                file_path, status = self.ui_queue.get_nowait()
+                file_path, status, malware_type = self.ui_queue.get_nowait()
                 self.processed_count += 1
                 self.progress_bar['value'] = self.processed_count
                 progress_percentage = (self.processed_count / self.total_files) * 100
                 self.percentage_label.config(text=f"{progress_percentage:.2f}%")
-                self.status_label.config(text=f"{status.capitalize()}: {file_path}")
+                if status == "matched" and malware_type:
+                    self.status_label.config(text=f"Matched ({malware_type}): {file_path}")
+                else:
+                    self.status_label.config(text=f"{status.capitalize()}: {file_path}")
                 self.ui_queue.task_done()
             except Empty:
                 break
@@ -297,12 +333,47 @@ class OSMSS:
         try:
             with open(file_path, "w", newline="", encoding="utf-8") as csvfile:
                 writer = csv.writer(csvfile)
-                writer.writerow(["File Path"])
-                for matched_file in self.matched_files:
-                    writer.writerow([matched_file])
+                writer.writerow(["File Path", "Malware Type"])
+                for matched_file, malware_type in self.matched_files:
+                    writer.writerow([matched_file, malware_type])
             messagebox.showinfo("Export Complete", f"Results exported successfully to {file_path}")
         except Exception as e:
             messagebox.showerror("Export Error", f"Failed to export results: {e}")
+
+    def display_matched_files(self):
+        for item in self.results_tree.get_children():
+            self.results_tree.delete(item)
+        for file_path, malware_type in self.matched_files:
+            self.results_tree.insert("", tk.END, values=(file_path, malware_type))
+        if self.matched_files:
+            self.remove_button.config(state=tk.NORMAL)
+        else:
+            self.remove_button.config(state=tk.DISABLED)
+
+    def on_result_select(self, event):
+        if self.results_tree.selection():
+            self.remove_button.config(state=tk.NORMAL)
+        else:
+            self.remove_button.config(state=tk.DISABLED)
+
+    def remove_selected_file(self):
+        selected_items = self.results_tree.selection()
+        if not selected_items:
+            return
+        confirm = messagebox.askyesno("Confirm Removal", "Remove selected file(s)? This action cannot be undone.")
+        if not confirm:
+            return
+        for item in selected_items:
+            file_path, malware_type = self.results_tree.item(item, "values")
+            try:
+                os.remove(file_path)
+                self.log(f"Removed file: {file_path}")
+            except Exception as e:
+                self.log(f"Failed to remove {file_path}: {e}")
+            self.results_tree.delete(item)
+            self.matched_files = [mf for mf in self.matched_files if mf[0] != file_path]
+        if not self.results_tree.get_children():
+            self.remove_button.config(state=tk.DISABLED)
 
     def append_log(self, message):
         self.log_text.config(state=tk.NORMAL)
