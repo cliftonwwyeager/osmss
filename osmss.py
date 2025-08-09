@@ -145,7 +145,7 @@ def scan_files(file_paths, signatures, ui_queue, log_queue, stop_event):
 class OSMSS:
     def __init__(self, master):
         self.master = master
-        master.title("OSMSS v1.0.8")
+        master.title("OSMSS v1.1.0")
         master.geometry("1000x700")
         master.configure(bg="#000000")
         self.style = ttk.Style()
@@ -388,3 +388,4 @@ if __name__ == "__main__":
     root = tk.Tk()
     app = OSMSS(root)
     root.mainloop()
+
